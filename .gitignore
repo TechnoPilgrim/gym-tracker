@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+dist/
+*.orig.*
+web-build/
+
+# API keys — never commit this
+config.ts
