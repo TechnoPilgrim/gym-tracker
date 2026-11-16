@@ -7,10 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "gymtracker",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#181825"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.laingventures.gymtracker",
@@ -20,7 +16,9 @@
     },
     "android": {
       "package": "com.laingventures.gymtracker",
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -29,6 +27,12 @@
         {
           "cameraPermission": "Used to scan Matrix equipment QR codes"
         }
+      ],
+      [
+	"expo-splash-screen",
+	{
+	 "backgroundColor": "#181825"
+	}
       ]
     ]
   }
