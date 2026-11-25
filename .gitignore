@@ -6,3 +6,4 @@ web-build/
 
 # API keys — never commit this
 config.ts
+.DS_Store

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,14 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMachineStore } from '../hooks/useMachineStore';
-import { parseMatrixQR, fetchMachineNameFromYouTube } from '../hooks/parseMatrixQR';
+import { parseMatrixQR, fetchMachineName } from '../hooks/parseMatrixQR';
 import { WeightCard } from '../components/WeightCard';
 import { GymMachine, MachineDisplay } from '../types';
-import { YOUTUBE_API_KEY } from '../config';
 
 type AppState =
   | { screen: 'home' }
   | { screen: 'scanning' }
-  | { screen: 'naming'; videoId: string; suggestedName: string }
+  | { screen: 'naming'; machineId: string; suggestedName: string }
   | { screen: 'loading' };
 
 export default function HomeScreen() {
@@ -27,6 +26,9 @@ export default function HomeScreen() {
   const [appState, setAppState] = useState<AppState>({ screen: 'home' });
   const [activeMachineId, setActiveMachineId] = useState<string | null>(null);
   const [editableName, setEditableName] = useState('');
+  // The camera reports the same QR code many times per second. This lock makes
+  // sure only the first report is handled; it's reset each time scanning starts.
+  const scanLock = useRef(false);
 
   const { getMachine, upsertMachine, updateWeight, loading } = useMachineStore();
 
@@ -39,45 +41,52 @@ export default function HomeScreen() {
   })();
 
   // ── Called by camera when QR is detected ──────────────────────────────────
+  function startScanning() {
+    scanLock.current = false;
+    setAppState({ screen: 'scanning' });
+  }
+
   async function handleBarCodeScanned({ data }: { data: string }) {
+    if (scanLock.current) return;
+    scanLock.current = true;
     setAppState({ screen: 'loading' });
 
     const parsed = parseMatrixQR(data);
     if (!parsed) {
+      // Show what was actually scanned, so a future failure explains itself
       Alert.alert(
         'Unrecognized QR Code',
-        'This doesn\'t look like a Matrix equipment QR code.',
+        `This doesn't look like a machine video link.\n\nIt contains:\n${data.slice(0, 200)}`,
         [{ text: 'OK', onPress: () => setAppState({ screen: 'home' }) }]
       );
       return;
     }
 
-    // Already seen this machine — just surface it, no API call needed
-    const existing = getMachine(parsed.videoId);
+    // Already seen this machine — just surface it, no lookup needed
+    const existing = getMachine(parsed.machineId);
     if (existing) {
-      setActiveMachineId(parsed.videoId);
+      setActiveMachineId(parsed.machineId);
       setAppState({ screen: 'home' });
       return;
     }
 
-    // New machine — fetch its name from YouTube
-    const fetchedName = await fetchMachineNameFromYouTube(parsed.videoId, YOUTUBE_API_KEY);
-    const suggestedName = fetchedName ?? `Machine ${parsed.videoId}`;
+    // New machine — look up its name from the video title (YouTube or Vimeo)
+    const suggestedName = (await fetchMachineName(parsed)) ?? '';
 
     // Show confirmation screen so user can correct the name if needed
     setEditableName(suggestedName);
-    setAppState({ screen: 'naming', videoId: parsed.videoId, suggestedName });
+    setAppState({ screen: 'naming', machineId: parsed.machineId, suggestedName });
   }
 
   // ── Called when user confirms the machine name ────────────────────────────
-  async function handleConfirmName(videoId: string) {
+  async function handleConfirmName(machineId: string) {
     const newMachine: GymMachine = {
-      id: videoId,
-      name: editableName.trim() || `Machine ${videoId}`,
+      id: machineId,
+      name: editableName.trim() || `Machine ${machineId}`,
       workingWeight: 45, // Sensible starting point (empty Olympic bar)
     };
     await upsertMachine(newMachine);
-    setActiveMachineId(videoId);
+    setActiveMachineId(machineId);
     setAppState({ screen: 'home' });
   }
 
@@ -111,20 +120,24 @@ export default function HomeScreen() {
         <View style={styles.namingCard}>
           <Text style={styles.namingTitle}>New Machine Found</Text>
           <Text style={styles.namingSubtitle}>
-            Confirm or edit the machine name:
+            {appState.suggestedName
+              ? 'Confirm or edit the machine name:'
+              : "Couldn't look up the name (no signal?). Please type it in:"}
           </Text>
           <TextInput
             style={styles.nameInput}
             value={editableName}
             onChangeText={setEditableName}
+            placeholder="e.g. Ultra / Leg Press"
+            placeholderTextColor="#6c7086"
             autoFocus
             selectTextOnFocus
             returnKeyType="done"
-            onSubmitEditing={() => handleConfirmName(appState.videoId)}
+            onSubmitEditing={() => handleConfirmName(appState.machineId)}
           />
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => handleConfirmName(appState.videoId)}
+            onPress={() => handleConfirmName(appState.machineId)}
           >
             <Text style={styles.primaryButtonText}>✓ Confirm Name</Text>
           </TouchableOpacity>
@@ -196,7 +209,7 @@ export default function HomeScreen() {
 
       <TouchableOpacity
         style={styles.primaryButton}
-        onPress={() => setAppState({ screen: 'scanning' })}
+        onPress={startScanning}
       >
         <Text style={styles.primaryButtonText}>
           {activeMachine ? '📷  Scan Another Machine' : '📷  Scan QR Code'}
